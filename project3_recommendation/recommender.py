@@ -13,6 +13,8 @@
 # ============================================================
 
 import os
+import sys
+import warnings
 import numpy as np
 import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -21,6 +23,8 @@ from sklearn.metrics.pairwise import cosine_similarity
 # ── DATASET PATH ─────────────────────────────────────────────
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CSV_PATH = os.path.join(BASE_DIR, "raw_skills.csv")
+
+warnings.filterwarnings("ignore", message="The parameter 'token_pattern' will not be used since 'tokenizer' is not None")
 
 
 # ── STEP 1: LOAD KNOWLEDGE BASE ──────────────────────────────
@@ -200,4 +204,7 @@ def run_recommender(interactive=True, prefilled_skills=None, top_n=3):
 
 # ── ENTRY POINT ───────────────────────────────────────────────
 if __name__ == "__main__":
-    run_recommender(interactive=True, top_n=3)
+    if len(sys.argv) > 1 and sys.argv[1].lower() == "demo":
+        run_recommender(interactive=False, prefilled_skills=["python", "machine learning", "tensorflow"], top_n=3)
+    else:
+        run_recommender(interactive=True, top_n=3)

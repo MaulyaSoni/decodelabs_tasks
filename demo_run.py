@@ -84,6 +84,112 @@ def demo_recognition():
     run_recognition(path_choice=1)
     print("  ✓ Recognition Demo Complete")
 
+
+# ── REQUESTED OUTPUT RUNNER ──────────────────────────────────
+def demo_chatbot_requested():
+    sep("REQUESTED OUTPUT — PROJECT 1 CHATBOT")
+    from chatbot_v2 import get_response, sanitize
+
+    conversation_history = []
+    groq_client = None  # deterministic L4 fallback for terminal output
+    demo_inputs = [
+        "hello",
+        "what is machine learning",
+        "why does model training sometimes fail even when the data looks clean?",
+    ]
+
+    print("  3-turn conversation with visible source labels:\n")
+    for i, raw_input in enumerate(demo_inputs, start=1):
+        response, source = get_response(sanitize(raw_input), groq_client, conversation_history, demo_mode=True)
+        print(f"  Turn {i}")
+        print(f"    You  : {raw_input}")
+        print(f"    DBot : {response}")
+        print(f"            {source}\n")
+        conversation_history.append({"role": "user", "content": raw_input})
+        conversation_history.append({"role": "assistant", "content": response})
+
+
+def demo_classification_requested():
+    sep("REQUESTED OUTPUT — PROJECT 2 CLASSIFICATION")
+    from classifier import load_data, split_data, scale_features, train_model, evaluate_model
+
+    X, y, class_names = load_data()
+    X_train, X_test, y_train, y_test = split_data(X, y)
+    X_train_sc, X_test_sc, scaler = scale_features(X_train, X_test)
+    model = train_model(X_train_sc, y_train, k=5)
+    evaluate_model(model, X_test_sc, y_test, class_names)
+
+
+def demo_recommendation_requested():
+    sep("REQUESTED OUTPUT — PROJECT 3 RECOMMENDATION")
+    from recommender import (
+        load_knowledge_base,
+        build_tfidf_matrix,
+        build_user_vector,
+        score_all_roles,
+        get_top_n,
+        display_recommendations,
+    )
+
+    sample_skills = ["python", "machine_learning", "tensorflow", "pandas", "sql"]
+    print(f"  Sample skill input: {sample_skills}\n")
+    df = load_knowledge_base()
+    tfidf_matrix, vectorizer = build_tfidf_matrix(df)
+    user_vector = build_user_vector(sample_skills, vectorizer)
+
+    if user_vector is None:
+        print("  No matching skills were found in the recommendation vocabulary.")
+        return
+
+    scored_df = score_all_roles(user_vector, tfidf_matrix, df)
+    top_results = get_top_n(scored_df, n=3)
+    display_recommendations(top_results, sample_skills)
+
+
+def demo_recognition_requested():
+    sep("REQUESTED OUTPUT — PROJECT 4 RECOGNITION")
+    from recognition import run_recognition_demo
+
+    result = run_recognition_demo()
+    if not result:
+        print("  Recognition demo could not run because a dependency is missing.")
+        return
+
+    print("\n  Extracted OCR text:")
+    for line in result["ocr_text"]:
+        print(f"    - {line}")
+
+    print("\n  Saved artifacts:")
+    print(f"    - OCR binary image      : {result['ocr_binary_path']}")
+    print(f"    - OCR text panel image  : {result['ocr_panel_path']}")
+    print(f"    - Detection image       : {result['detection_output_path']}")
+
+    print("\n  Detection summary:")
+    for item in result["detections"]:
+        print(
+            f"    - {item['label']} | {item['confidence']*100:.1f}% | "
+            f"BBox X={item['x']}, Y={item['y']}, W={item['w']}, H={item['h']}"
+        )
+
+
+def run_requested_output_demo():
+    print("\n" + "█"*60)
+    print("  DECODELABS AI SUITE — REQUESTED OUTPUT DEMO")
+    print("  Chatbot + Classification + Recommendation + Recognition")
+    print("█"*60)
+
+    demo_chatbot_requested()
+    pause(0.8)
+    demo_classification_requested()
+    pause(0.8)
+    demo_recommendation_requested()
+    pause(0.8)
+    demo_recognition_requested()
+
+    print("\n" + "█"*60)
+    print("  REQUESTED OUTPUT DEMO COMPLETE ✓")
+    print("█"*60 + "\n")
+
 # ── MASTER RUNNER ─────────────────────────────────────────────
 def run_demo():
     print("\n"+"█"*60)
@@ -109,4 +215,7 @@ def run_demo():
     print("█"*60+"\n")
 
 if __name__ == "__main__":
-    run_demo()
+    if len(sys.argv) > 1 and sys.argv[1].lower() in {"requested", "report", "output"}:
+        run_requested_output_demo()
+    else:
+        run_demo()

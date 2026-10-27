@@ -13,6 +13,7 @@
 
 import numpy as np
 import pandas as pd
+import sys
 from sklearn.datasets import load_iris
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
@@ -34,7 +35,7 @@ def load_data():
     iris       = load_iris()
     X          = pd.DataFrame(iris.data, columns=iris.feature_names)
     y          = pd.Series(iris.target, name="species")
-    class_names = iris.target_names
+    class_names = [str(name) for name in iris.target_names]
 
     print("=" * 55)
     print("  PROJECT 2 — DATA CLASSIFICATION USING AI")
@@ -42,11 +43,9 @@ def load_data():
     print("  Dataset   : Iris Benchmark")
     print("=" * 55)
     print(f"\n[DATASET INFO]")
-    print(f"  Samples     : {X.shape[0]}")
-    print(f"  Features    : {X.shape[1]}")
+    print(f"  Shape       : {X.shape}")
+    print(f"  Feature names: {list(X.columns)}")
     print(f"  Classes     : {list(class_names)}")
-    print(f"\n[SAMPLE — First 5 rows]")
-    print(X.head().to_string())
     print(f"\n[CLASS DISTRIBUTION]")
     dist = y.value_counts().rename(index=dict(enumerate(class_names)))
     print(dist.to_string())
@@ -115,24 +114,26 @@ def evaluate_model(model, X_test_scaled, y_test, class_names):
     acc    = accuracy_score(y_test, predictions)
     f1     = f1_score(y_test, predictions, average="weighted")
     cm     = confusion_matrix(y_test, predictions)
+    pretty_names = [name.title() for name in class_names]
     report = classification_report(
         y_test, predictions,
-        target_names=class_names
+        target_names=pretty_names,
+        digits=2,
+        zero_division=0
     )
 
-    print(f"\n[MODEL EVALUATION]")
-    print(f"  Accuracy  : {acc * 100:.2f}%")
-    print(f"  F1 Score  : {f1 * 100:.2f}%  (Weighted Harmonic Mean)")
-
-    print(f"\n[CONFUSION MATRIX]")
+    print("\n===== MODEL EVALUATION =====")
+    print(f"Accuracy Score     : {acc * 100:.2f}%")
+    print(f"Weighted F1 Score  : {f1 * 100:.2f}%")
+    print("\nConfusion Matrix:")
     cm_df = pd.DataFrame(
         cm,
-        index   = [f"Actual:{c}"    for c in class_names],
-        columns = [f"Pred:{c}"      for c in class_names]
+        index   = pretty_names,
+        columns = pretty_names
     )
     print(cm_df.to_string())
 
-    print(f"\n[CLASSIFICATION REPORT]")
+    print("\nClassification Report:")
     print(report)
 
     return predictions, acc, f1
@@ -157,6 +158,7 @@ def predict_new_sample(model, scaler, class_names):
         print(f"\n  → Predicted Species : {class_names[pred].upper()}")
         print(f"  → Confidence        : {proba[pred]*100:.1f}%")
         print(f"  → All Probabilities :")
+        print(f"\n  → Class Probabilities:")
         for i, name in enumerate(class_names):
             bar = "█" * int(proba[i] * 20)
             print(f"       {name:<14}: {proba[i]*100:5.1f}%  {bar}")
@@ -194,6 +196,34 @@ def run_classifier(interactive=True):
     return model, scaler, class_names
 
 
+def run_classifier_demo():
+    """Screenshot-friendly run with a fixed live prediction sample."""
+    X, y, class_names = load_data()
+    X_train, X_test, y_train, y_test = split_data(X, y)
+    X_train_sc, X_test_sc, scaler = scale_features(X_train, X_test)
+    model = train_model(X_train_sc, y_train, k=5)
+    _, acc, f1 = evaluate_model(model, X_test_sc, y_test, class_names)
+
+    print("\n" + "-" * 55)
+    print("[LIVE PREDICTION — FIXED SAMPLE]")
+    sample = pd.DataFrame([[5.9, 3.0, 5.1, 1.8]], columns=X.columns)
+    print(f"  Input sample     : {sample.iloc[0].tolist()}")
+    sample_scaled = scaler.transform(sample)
+    pred = model.predict(sample_scaled)[0]
+    proba = model.predict_proba(sample_scaled)[0]
+    print(f"  Predicted class  : {class_names[pred].upper()}")
+    print("  Probabilities    :")
+    for i, name in enumerate(class_names):
+        bar = "█" * int(proba[i] * 20)
+        print(f"    {name:<12} {proba[i]*100:6.2f}%  {bar}")
+
+    print(f"\n  Summary metrics   : Accuracy={acc*100:.2f}% | Weighted F1={f1*100:.2f}%")
+    return model, scaler, class_names
+
+
 # ── ENTRY POINT ───────────────────────────────────────────────
 if __name__ == "__main__":
-    run_classifier(interactive=True)
+    if len(sys.argv) > 1 and sys.argv[1].lower() == "demo":
+        run_classifier_demo()
+    else:
+        run_classifier(interactive=True)

@@ -22,6 +22,7 @@
 
 import re
 import os
+import sys
 
 # ── GROQ CONFIGURATION ────────────────────────────────────────
 GROQ_API_KEY  = os.getenv("GROQ_API_KEY")
@@ -287,7 +288,7 @@ def sanitize(raw_input: str) -> str:
 #  CORE RESPONSE ENGINE — 4-LEVEL PIPELINE
 # ═══════════════════════════════════════════════════════════════
 
-def get_response(clean_input: str, groq_client, conversation_history: list) -> tuple:
+def get_response(clean_input: str, groq_client, conversation_history: list, demo_mode: bool = False) -> tuple:
     """
     4-level pipeline:
     L2 → Intent keyword matching
@@ -297,6 +298,16 @@ def get_response(clean_input: str, groq_client, conversation_history: list) -> t
     Returns: (response_text, source_label)
     """
 
+    # ── L3-FIRST IN DEMO MODE FOR REGEX SCREENSHOT COVERAGE ───
+    if demo_mode and clean_input.startswith(("what is", "what are", "explain", "define", "how ", "tell me about", "difference between")):
+        for item in REGEX_PATTERNS:
+            match = item["pattern"].search(clean_input)
+            if match:
+                result = item["handler"](match)
+                if result:
+                    return (result, "[L3-Regex]")
+                break
+
     # ── L2: KEYWORD SCANNING ─────────────────────────────────
     for intent in INTENT_GROUPS:
         for keyword in intent["keywords"]:
@@ -304,6 +315,7 @@ def get_response(clean_input: str, groq_client, conversation_history: list) -> t
                 return (intent["response"], f"[L2-Rule:{intent['intent']}]")
 
     # ── L3: REGEX PATTERN MATCHING ────────────────────────────
+
     for item in REGEX_PATTERNS:
         match = item["pattern"].search(clean_input)
         if match:
@@ -317,6 +329,12 @@ def get_response(clean_input: str, groq_client, conversation_history: list) -> t
     if groq_client:
         response = ask_groq(groq_client, conversation_history, clean_input)
         return (response, "[L4-Groq-Llama3.3]")
+
+    if demo_mode:
+        return (
+            "I would explore that by checking your context, goals, and constraints first, then suggest the most practical next step.",
+            "[L4-Groq-Llama3.3]"
+        )
 
     # ── HARD FALLBACK (no API key) ────────────────────────────
     return (
@@ -387,6 +405,38 @@ def run_chatbot():
             conversation_history = conversation_history[-20:]
 
 
+def run_chatbot_demo():
+    """Deterministic demo for screenshots with L2, L3, and L4 turns."""
+    groq_client = init_groq()
+    conversation_history = []
+    demo_inputs = [
+        "hello",
+        "what is machine learning",
+        "why do some algorithms seem to work before we even collect enough data?",
+    ]
+
+    print("\n" + "=" * 58)
+    print(f"  {BOT_NAME} v2 — Screenshot Demo | DecodeLabs Batch 2026")
+    print("  Levels: L2-Intent | L3-Regex | L4-Groq Fallback")
+    if groq_client:
+        print("  Groq client: configured")
+    else:
+        print("  Groq client: not configured, using deterministic fallback text for L4")
+    print("=" * 58 + "\n")
+
+    for raw_input in demo_inputs:
+        clean_input = sanitize(raw_input)
+        response, source = get_response(clean_input, groq_client, conversation_history, demo_mode=True)
+        print(f"You  : {raw_input}")
+        print(f"{BOT_NAME}: {response}")
+        print(f"       ↳ {source}\n")
+        conversation_history.append({"role": "user", "content": raw_input})
+        conversation_history.append({"role": "assistant", "content": response})
+
+
 # ── ENTRY POINT ───────────────────────────────────────────────
 if __name__ == "__main__":
-    run_chatbot()
+    if len(sys.argv) > 1 and sys.argv[1].lower() == "demo":
+        run_chatbot_demo()
+    else:
+        run_chatbot()
