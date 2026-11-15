@@ -1,442 +1,597 @@
-# ============================================================
-#  DecodeLabs | Industrial Training Kit | Batch 2026
-#  Project 1  : Rule-Based AI Chatbot — VERSION 2 (HYBRID)
-#  Type       : Rule-Based + Groq Llama 3.3 Fallback
-#  Levels     : L1 Keyword Extraction
-#               L2 Intent Grouping
-#               L3 Regex Pattern Matching
-#               L4 Groq Llama 3.3 Fallback (Free Tier)
-# ============================================================
-#
-#  HOW TO RUN:
-#  1. pip install groq
-#  2. Get FREE API key → https://console.groq.com
-#  3. Paste key in GROQ_API_KEY below
-#  4. python chatbot_v2.py
-#
-#  FREE TIER LIMITS (Groq):
-#  → 30 requests/minute
-#  → No credit card needed
-#  → Model: llama-3.3-70b-versatile
-# ============================================================
+"""DecodeLabs Industrial Training Kit - Batch 2026.
 
-import re
+Project 1: Rule-Based & Hybrid AI Chatbot - Version 2 (Dynamic Hybrid AI Engine)
+Real runtime conversational experience:
+- Streaming character/token effect for representable modern AI feel
+- Colorized / formatted terminal output
+- Real-time Groq Cloud Llama 3.3 generation when online
+- Seamless fallbacks: Intent -> Regex/Fuzzy -> Dynamic Generative Fallback
+- Dynamic multi-turn memory & contextual awareness
+- System commands: /help, /reset, /history, /mode, /save, /exit
+"""
+from __future__ import annotations
+
+import argparse
+import datetime
+import json
 import os
+import random
+import re
 import sys
+import time
+import unicodedata
+from collections import deque
+from difflib import get_close_matches
+from pathlib import Path
+from typing import Any, Deque, Dict, List, Optional, Tuple
 
-# ── GROQ CONFIGURATION ────────────────────────────────────────
-GROQ_API_KEY  = os.getenv("GROQ_API_KEY")
-GROQ_MODEL    = "llama-3.3-70b-versatile"   # Best free model on Groq
-BOT_NAME      = "DBot"
+BASE_DIR = Path(__file__).resolve().parent
+REPO_ROOT = BASE_DIR.parent
+INTENTS_FILE = BASE_DIR / "intents.json"
+OUTPUTS_DIR = REPO_ROOT / "outputs"
+UNKNOWN_LOG = OUTPUTS_DIR / "unknown_queries.log"
 
-SYSTEM_PROMPT = (
-    f"You are {BOT_NAME}, a friendly AI assistant built by DecodeLabs "
-    f"for their AI internship batch 2026 in Lucknow, India. "
-    f"Keep responses concise (3-4 lines max), clear, and helpful. "
-    f"Speak in plain conversational text without markdown or bullet points."
-)
+try:
+    sys.path.insert(0, str(REPO_ROOT))
+    from common.config import GROQ_API_KEY as CFG_GROQ_KEY, GROQ_MODEL as CFG_GROQ_MODEL
+except Exception:
+    CFG_GROQ_KEY = os.getenv("GROQ_API_KEY", "")
+    CFG_GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+
+BOT_NAME = "DBot"
+DEFAULT_MODEL = "qwen/qwen3.8-27b"
+EXIT_COMMANDS = {"exit", "quit", "bye", "goodbye", "stop", "/exit", "/quit"}
+
+# Terminal Styling Helpers (ANSI)
+CYAN = "\033[96m"
+GREEN = "\033[92m"
+YELLOW = "\033[93m"
+BLUE = "\033[94m"
+MAGENTA = "\033[95m"
+BOLD = "\033[1m"
+DIM = "\033[2m"
+RESET = "\033[0m"
+
+# Rate limiter state
+_RATE_LIMIT_TIMESTAMPS: Deque[float] = deque(maxlen=25)
+
+CONTRACTIONS = {
+    "what's": "what is",
+    "who's": "who is",
+    "where's": "where is",
+    "how's": "how is",
+    "i'm": "i am",
+    "can't": "cannot",
+    "won't": "will not",
+    "don't": "do not",
+    "doesn't": "does not",
+    "it's": "it is",
+    "didn't": "did not",
+    "isn't": "is not",
+    "aren't": "are not",
+    "couldn't": "could not",
+    "shouldn't": "should not",
+}
+
+GUARDRAIL_PATTERNS = [
+    r"\bdrop\s+table\b",
+    r"\bselect\s+\*\s+from\b",
+    r"\b(?:hack|exploit|bomb|kill|suicide|attack)\b",
+    r"\b(?:idiot|moron|stupid\s+bot|curse|abuse)\b",
+]
+
+EMAIL_REGEX = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b")
+PHONE_REGEX = re.compile(r"\b(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b")
 
 
-# ═══════════════════════════════════════════════════════════════
-#  LEVEL 4 — GROQ LLAMA 3.3 FALLBACK
-# ═══════════════════════════════════════════════════════════════
+def stream_print(text: str, delay: float = 0.012, end: str = "\n") -> None:
+    """Stream text output dynamically to simulate interactive neural generation."""
+    for char in text:
+        sys.stdout.write(char)
+        sys.stdout.flush()
+        time.sleep(delay)
+    sys.stdout.write(end)
+    sys.stdout.flush()
+
+
+def normalize_text(raw_input: Optional[str]) -> str:
+    """Normalize text: Unicode NFKC, lowercase, contractions, strip punctuation except apostrophes."""
+    if raw_input is None:
+        return ""
+    text = unicodedata.normalize("NFKC", str(raw_input)).lower().strip()
+    text = text.replace("’", "'").replace("`", "'")
+    text = text.replace("-", " ")
+    text = re.sub(r"\s+", " ", text)
+    for old, new in CONTRACTIONS.items():
+        text = re.sub(rf"\b{re.escape(old)}\b", new, text)
+    text = re.sub(r"[^a-z0-9\s'/]", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def sanitize(raw_input: str) -> str:
+    """Sanitize user input for consistent pipeline handling."""
+    return normalize_text(raw_input)
+
+
+def word_boundary_match(text: str, phrase: str) -> bool:
+    """Strict word-boundary matching to prevent substring false-positives."""
+    if not text or not phrase:
+        return False
+    norm_phrase = normalize_text(phrase)
+    if not norm_phrase:
+        return False
+    return bool(re.search(rf"\b{re.escape(norm_phrase)}\b", text))
+
+
+def redact_pii(text: str) -> str:
+    """Redact email addresses and phone numbers before sending to external services."""
+    redacted = EMAIL_REGEX.sub("[EMAIL REDACTED]", text)
+    redacted = PHONE_REGEX.sub("[PHONE REDACTED]", redacted)
+    return redacted
+
+
+def check_guardrails(text: str) -> Optional[str]:
+    """Check against abusive or prohibited keywords."""
+    lowered = text.lower()
+    for pattern in GUARDRAIL_PATTERNS:
+        if re.search(pattern, lowered):
+            return "I am programmed to be helpful, professional, and safe. I cannot assist with harmful, abusive, or destructive requests."
+    return None
+
+
+def load_intents(filepath: Path = INTENTS_FILE) -> List[Dict[str, Any]]:
+    """Load intents from JSON file with safe built-in fallback."""
+    if filepath.is_file():
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return data.get("intents", [])
+        except Exception:
+            pass
+
+    return [
+        {
+            "intent": "greeting",
+            "keywords": ["hello", "hi", "hey", "good morning", "good evening", "good afternoon", "howdy"],
+            "responses": [f"Hey! I'm {BOT_NAME}. What's on your mind today?"],
+            "follow_up": "I can help explain AI/ML concepts, tell jokes, or guide you through our projects.",
+        },
+        {
+            "intent": "farewell",
+            "keywords": ["bye", "goodbye", "see you later", "take care"],
+            "responses": ["Goodbye! Keep building great things. 🚀"],
+            "follow_up": "Come back anytime for more questions.",
+        },
+        {
+            "intent": "identity",
+            "keywords": ["who are you", "what are you", "your name"],
+            "responses": [f"I'm {BOT_NAME}, an intelligent assistant built at DecodeLabs in Lucknow."],
+            "follow_up": "I run with high-speed deterministic rules and real-time Groq Llama 3.3 generation.",
+        },
+        {
+            "intent": "ai_definition",
+            "keywords": ["what is ai", "artificial intelligence"],
+            "responses": ["AI (Artificial Intelligence) is the simulation of human cognitive intelligence by computing systems."],
+            "follow_up": "Key AI domains include Machine Learning, Deep Learning, NLP, and Computer Vision.",
+        },
+        {
+            "intent": "ml_definition",
+            "keywords": ["what is ml", "machine learning", "what is machine learning"],
+            "responses": ["Machine learning is an AI subfield where systems learn patterns from data and improve their performance over time."],
+            "follow_up": "Common ML algorithms include KNN, Decision Trees, SVM, and Neural Networks.",
+        },
+        {
+            "intent": "llm_definition",
+            "keywords": ["what is llm", "large language model"],
+            "responses": ["Large language models are deep neural networks trained on vast text to understand, reason, and generate natural language."],
+            "follow_up": "Modern LLMs like Llama 3.3, GPT-4, and Claude utilize Transformer multi-head attention mechanisms.",
+        },
+        {
+            "intent": "time",
+            "keywords": ["what time is it", "what is the time", "current time", "time now"],
+            "responses": ["TIME_DYNAMIC"],
+            "follow_up": "Time management and continuous experimentation are key to engineering excellence.",
+        },
+        {
+            "intent": "thanks",
+            "keywords": ["thank you", "thanks"],
+            "responses": ["Happy to help! Keep coding and exploring!"],
+            "follow_up": "Let me know what else you'd like to work on.",
+        },
+    ]
+
+
+def log_unknown_query(query: str) -> None:
+    """Log unrecognized query to outputs/unknown_queries.log."""
+    try:
+        OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
+        with open(UNKNOWN_LOG, "a", encoding="utf-8") as f:
+            f.write(f"{datetime.datetime.now().isoformat()} - {query}\n")
+    except Exception:
+        pass
+
 
 def init_groq():
-    """Initialize Groq client. Returns client or None if key missing."""
-    if GROQ_API_KEY == "YOUR_GROQ_API_KEY_HERE":
+    """Initialize Groq client if valid API key is present."""
+    api_key = os.getenv("GROQ_API_KEY", CFG_GROQ_KEY).strip()
+    if not api_key or api_key.startswith("your_") or api_key == "YOUR_GROQ_API_KEY_HERE":
         return None
     try:
         from groq import Groq
-        client = Groq(api_key=GROQ_API_KEY)
-        # Quick test call to validate key
-        return client
-    except ImportError:
-        print("[WARNING] groq package not installed. Run: pip install groq")
-        return None
-    except Exception as e:
-        print(f"[WARNING] Groq init failed: {e}")
+        return Groq(api_key=api_key, timeout=10.0)
+    except Exception:
         return None
 
 
-def ask_groq(client, conversation_history: list, user_input: str) -> str:
-    """Send conversation + new input to Groq Llama 3.3."""
-    try:
-        # Build messages: system prompt + last 6 turns + new input
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-
-        for turn in conversation_history[-6:]:
-            role = turn["role"]
-            # Groq uses "user" and "assistant" (not "model")
-            if role == "model":
-                role = "assistant"
-            messages.append({"role": role, "content": turn["content"]})
-
-        messages.append({"role": "user", "content": user_input})
-
-        response = client.chat.completions.create(
-            model=GROQ_MODEL,
-            messages=messages,
-            max_tokens=200,
-            temperature=0.7
-        )
-        return response.choices[0].message.content.strip()
-
-    except Exception as e:
-        err = str(e)
-        if "429" in err:
-            return "Rate limit hit. Wait 10 seconds and try again. (Groq free: 30 req/min)"
-        if "401" in err or "403" in err:
-            return "Invalid API key. Check your GROQ_API_KEY in chatbot_v2.py"
-        return f"Groq error: {err[:80]}. Falling back to rule-based mode."
+def can_make_groq_call() -> bool:
+    """Check local throttle: max 25 calls in any 60-second window."""
+    now = time.time()
+    while _RATE_LIMIT_TIMESTAMPS and now - _RATE_LIMIT_TIMESTAMPS[0] > 60:
+        _RATE_LIMIT_TIMESTAMPS.popleft()
+    if len(_RATE_LIMIT_TIMESTAMPS) >= 25:
+        return False
+    _RATE_LIMIT_TIMESTAMPS.append(now)
+    return True
 
 
-# ═══════════════════════════════════════════════════════════════
-#  LEVEL 2 — INTENT GROUPS (Keyword Sets → Single Response)
-# ═══════════════════════════════════════════════════════════════
+def ask_groq(
+    client,
+    conversation_history: List[Dict[str, str]],
+    user_input: str,
+    max_retries: int = 3,
+) -> str:
+    """Query Groq Llama 3.3 with backoff, history capping, and PII redaction."""
+    if client is None:
+        return "I am currently running in offline rule mode. You can ask me about AI, ML, NLP, or DecodeLabs topics!"
 
-INTENT_GROUPS = [
-    {
-        "intent"   : "greeting",
-        "keywords" : ["hello","hi","hey","sup","greetings","good morning",
-                      "good evening","good afternoon","what's up","whats up","howdy"],
-        "response" : f"Hey! I'm {BOT_NAME}, your hybrid AI assistant. What's on your mind?"
-    },
-    {
-        "intent"   : "farewell",
-        "keywords" : ["bye","goodbye","see you","take care","later","cya",
-                      "good night","goodnight"],
-        "response" : "Goodbye! Keep building. See you next time. 🚀"
-    },
-    {
-        "intent"   : "identity",
-        "keywords" : ["who are you","what are you","your name","introduce yourself",
-                      "tell me about yourself","are you a bot","are you human","are you ai"],
-        "response" : (
-            f"I'm {BOT_NAME} v2 — a hybrid AI chatbot built at DecodeLabs. "
-            f"I use rule-based logic first (fast & deterministic), "
-            f"then Groq Llama 3.3 as my fallback brain for unknown questions."
-        )
-    },
-    {
-        "intent"   : "capability",
-        "keywords" : ["what can you do","help","commands","options",
-                      "how do you work","what do you know","capabilities"],
-        "response" : (
-            "Here's what I can handle:\n"
-            "  → Greetings and farewells\n"
-            "  → Questions about AI, ML, LLMs, NLP\n"
-            "  → 'What is [anything]?' — I'll explain it\n"
-            "  → 'How to [do anything]?' — Groq handles it\n"
-            "  → Jokes, motivation, time\n"
-            "  → Any unknown question → Groq Llama 3.3 answers it!"
-        )
-    },
-    {
-        "intent"   : "creator",
-        "keywords" : ["who made you","who built you","who created you",
-                      "who programmed you","who coded you"],
-        "response" : f"Built by a DecodeLabs AI intern, Batch 2026. Powered by rules + Llama 3.3."
-    },
-    {
-        "intent"   : "ai_concept",
-        "keywords" : ["what is ai","artificial intelligence","define ai","explain ai"],
-        "response" : (
-            "AI (Artificial Intelligence) is the simulation of human intelligence "
-            "by machines — enabling them to learn, reason, and make decisions from data."
-        )
-    },
-    {
-        "intent"   : "ml_concept",
-        "keywords" : ["what is ml","machine learning","define ml","explain machine learning"],
-        "response" : (
-            "ML (Machine Learning) is a subset of AI where systems automatically "
-            "learn patterns from data without being explicitly programmed for each task."
-        )
-    },
-    {
-        "intent"   : "llm_concept",
-        "keywords" : ["what is llm","large language model","what is gpt","what is gemini",
-                      "what is claude","what is llama","generative ai"],
-        "response" : (
-            "LLMs are massive neural networks trained on text. "
-            "They predict the next token to generate human-like responses. "
-            "Examples: GPT-4, Gemini, Claude, Llama 3.3."
-        )
-    },
-    {
-        "intent"   : "groq",
-        "keywords" : ["what is groq","groq","llama","llama 3"],
-        "response" : (
-            "Groq is a free AI inference platform. I use it as my L4 fallback. "
-            "It runs Llama 3.3-70B at blazing speed. Free tier: 30 req/min. "
-            "Get your key at console.groq.com"
-        )
-    },
-    {
-        "intent"   : "decodelabs",
-        "keywords" : ["decodelabs","decode labs","this internship","this training"],
-        "response" : (
-            "DecodeLabs is an AI training program in Greater Lucknow, India. "
-            "It teaches real-world AI engineering through hands-on projects. "
-            "You're currently in Batch 2026!"
-        )
-    },
-    {
-        "intent"   : "joke",
-        "keywords" : ["joke","tell me a joke","make me laugh","funny"],
-        "response" : "Why do programmers prefer dark mode? Because light attracts bugs! 🐛"
-    },
-    {
-        "intent"   : "motivation",
-        "keywords" : ["motivate me","i am tired","i'm tired","feeling low",
-                      "i give up","this is hard","encourage me","inspire me"],
-        "response" : (
-            "An LLM without rules is a hallucination engine. "
-            "YOU are the rules. Every line of code you write today "
-            "is a brick in the foundation of your career. Keep going. 💪"
-        )
-    },
-    {
-        "intent"   : "thanks",
-        "keywords" : ["thank you","thanks","thx","ty","appreciate it","great job"],
-        "response" : "Happy to help! That's what I'm here for. 😊"
-    },
-    {
-        "intent"   : "projects",
-        "keywords" : ["what are the projects","project 1","project 2","project 3",
-                      "decodelabs projects"],
-        "response" : (
-            "DecodeLabs has 3 projects:\n"
-            "  P1 → Rule-Based AI Chatbot (this one!)\n"
-            "  P2 → Data Classification Using AI (KNN + Iris)\n"
-            "  P3 → AI Recommendation Logic (TF-IDF + Cosine Similarity)"
-        )
-    },
-]
+    if not can_make_groq_call():
+        return "Local request throttle reached (max 25 req/min). Please try again in a moment."
 
-
-# ═══════════════════════════════════════════════════════════════
-#  LEVEL 3 — REGEX PATTERNS (Dynamic Question Handling)
-# ═══════════════════════════════════════════════════════════════
-
-def handle_what_is(match):
-    topic = match.group(1).strip()
-    for intent in INTENT_GROUPS:
-        if any(topic in kw for kw in intent["keywords"]):
-            return intent["response"]
-    return None  # Escalate to Groq
-
-def handle_how_to(match):
-    return None  # Always escalate to Groq
-
-def handle_tell_me_about(match):
-    return None  # Escalate to Groq
-
-def handle_difference(match):
-    return None  # Escalate to Groq
-
-def handle_time(_match):
-    import datetime
-    now = datetime.datetime.now()
-    return f"Current time: {now.strftime('%I:%M %p, %d %B %Y')}"
-
-REGEX_PATTERNS = [
-    {
-        "pattern" : re.compile(r"what is (.+)",            re.IGNORECASE),
-        "handler" : handle_what_is
-    },
-    {
-        "pattern" : re.compile(r"what are (.+)",           re.IGNORECASE),
-        "handler" : handle_what_is
-    },
-    {
-        "pattern" : re.compile(r"explain (.+)",            re.IGNORECASE),
-        "handler" : handle_what_is
-    },
-    {
-        "pattern" : re.compile(r"define (.+)",             re.IGNORECASE),
-        "handler" : handle_what_is
-    },
-    {
-        "pattern" : re.compile(r"how (?:do|can|to) (.+)", re.IGNORECASE),
-        "handler" : handle_how_to
-    },
-    {
-        "pattern" : re.compile(r"tell me about (.+)",      re.IGNORECASE),
-        "handler" : handle_tell_me_about
-    },
-    {
-        "pattern" : re.compile(r"difference between (.+) and (.+)", re.IGNORECASE),
-        "handler" : handle_difference
-    },
-    {
-        "pattern" : re.compile(r"(?:what(?:'s| is) the )?(?:current )?time", re.IGNORECASE),
-        "handler" : handle_time
-    },
-]
-
-
-# ═══════════════════════════════════════════════════════════════
-#  INPUT SANITIZATION
-# ═══════════════════════════════════════════════════════════════
-
-def sanitize(raw_input: str) -> str:
-    return raw_input.lower().strip()
-
-
-# ═══════════════════════════════════════════════════════════════
-#  CORE RESPONSE ENGINE — 4-LEVEL PIPELINE
-# ═══════════════════════════════════════════════════════════════
-
-def get_response(clean_input: str, groq_client, conversation_history: list, demo_mode: bool = False) -> tuple:
-    """
-    4-level pipeline:
-    L2 → Intent keyword matching
-    L3 → Regex dynamic pattern matching
-    L4 → Groq Llama 3.3 fallback
-
-    Returns: (response_text, source_label)
-    """
-
-    # ── L3-FIRST IN DEMO MODE FOR REGEX SCREENSHOT COVERAGE ───
-    if demo_mode and clean_input.startswith(("what is", "what are", "explain", "define", "how ", "tell me about", "difference between")):
-        for item in REGEX_PATTERNS:
-            match = item["pattern"].search(clean_input)
-            if match:
-                result = item["handler"](match)
-                if result:
-                    return (result, "[L3-Regex]")
-                break
-
-    # ── L2: KEYWORD SCANNING ─────────────────────────────────
-    for intent in INTENT_GROUPS:
-        for keyword in intent["keywords"]:
-            if keyword in clean_input:
-                return (intent["response"], f"[L2-Rule:{intent['intent']}]")
-
-    # ── L3: REGEX PATTERN MATCHING ────────────────────────────
-
-    for item in REGEX_PATTERNS:
-        match = item["pattern"].search(clean_input)
-        if match:
-            result = item["handler"](match)
-            if result:
-                return (result, "[L3-Regex]")
-            else:
-                break  # Fall to Groq with original input
-
-    # ── L4: GROQ LLAMA 3.3 FALLBACK ──────────────────────────
-    if groq_client:
-        response = ask_groq(groq_client, conversation_history, clean_input)
-        return (response, "[L4-Groq-Llama3.3]")
-
-    if demo_mode:
-        return (
-            "I would explore that by checking your context, goals, and constraints first, then suggest the most practical next step.",
-            "[L4-Groq-Llama3.3]"
-        )
-
-    # ── HARD FALLBACK (no API key) ────────────────────────────
-    return (
-        "I don't know that yet. Add your Groq API key in chatbot_v2.py "
-        "to unlock Llama 3.3 responses! Get free key at console.groq.com",
-        "[Fallback]"
+    safe_prompt = redact_pii(user_input[:600])
+    system_prompt = (
+        f"You are {BOT_NAME}, an advanced and engaging AI assistant engineered by DecodeLabs "
+        f"for their AI Engineering Internship Batch 2026 in Greater Lucknow, India. "
+        f"Answer clearly, dynamically, and informatively. Explain complex ideas simply with technical depth when appropriate."
     )
 
+    messages = [{"role": "system", "content": system_prompt}]
+    for turn in (conversation_history or [])[-8:]:
+        role = turn.get("role", "user")
+        if role == "model":
+            role = "assistant"
+        messages.append({"role": role, "content": turn.get("content", "")})
+    messages.append({"role": "user", "content": safe_prompt})
 
-# ═══════════════════════════════════════════════════════════════
-#  EXIT COMMANDS
-# ═══════════════════════════════════════════════════════════════
-
-EXIT_COMMANDS = {"exit", "quit", "stop", "bye", "goodbye", "/exit", "/quit"}
-
-
-# ═══════════════════════════════════════════════════════════════
-#  MAIN LOOP — THE HEARTBEAT
-# ═══════════════════════════════════════════════════════════════
-
-def run_chatbot():
-    groq_client = init_groq()
-
-    conversation_history = []
-
-    print("\n" + "=" * 58)
-    print(f"  {BOT_NAME} v2 — Hybrid Chatbot | DecodeLabs Batch 2026")
-    print(f"  Levels: L2-Intent | L3-Regex", end="")
-    if groq_client:
-        print(f" | L4-Groq Llama 3.3 ✓")
-    else:
-        print(f"\n  [!] Groq not configured — pure rule mode active")
-        print(f"      Add key at console.groq.com → paste in GROQ_API_KEY")
-    print("  Type 'help' for options. Type 'exit' to quit.")
-    print("=" * 58 + "\n")
-
-    while True:
-
-        # ── INPUT ─────────────────────────────────────────────
+    delay = 1.0
+    for attempt in range(max_retries):
         try:
-            raw_input = input("You  : ")
-        except (KeyboardInterrupt, EOFError):
-            print(f"\n{BOT_NAME}: Caught interrupt. Goodbye! 🚀")
-            break
+            resp = client.chat.completions.create(
+                model=DEFAULT_MODEL,
+                messages=messages,
+                max_tokens=350,
+                temperature=0.7,
+            )
+            return resp.choices[0].message.content.strip()
+        except Exception as exc:
+            err = str(exc)
+            if "429" in err or "500" in err or "503" in err:
+                if attempt < max_retries - 1:
+                    time.sleep(delay)
+                    delay *= 2
+                    continue
+                return "The AI engine is temporarily busy. Please ask again in a few seconds."
+            if "401" in err or "403" in err:
+                return "Groq authentication failed. Running in offline rule-based mode."
+            return f"Service notice: {err[:80]}."
 
-        clean_input = sanitize(raw_input)
+    return "Could not reach the neural engine. Please check network connection."
 
-        if not clean_input:
-            print(f"{BOT_NAME}: Say something!\n")
+
+def find_best_intent(
+    text: str,
+    intents: Optional[List[Dict[str, Any]]] = None,
+) -> Optional[Tuple[Dict[str, Any], str]]:
+    """Score-based intent matcher prioritizing multi-word and specific phrases."""
+    if intents is None:
+        intents = load_intents()
+
+    best_intent = None
+    best_match_phrase = ""
+    best_score = (-1, -1, -999)
+
+    for idx, entry in enumerate(intents):
+        matches = [
+            kw for kw in entry.get("keywords", []) if word_boundary_match(text, kw)
+        ]
+        if not matches:
             continue
 
-        # ── EXIT CHECK ────────────────────────────────────────
-        if clean_input in EXIT_COMMANDS:
-            print(f"{BOT_NAME}: Goodbye! Keep building. 🚀\n")
-            break
+        match_count = len(matches)
+        max_len = max(len(kw) for kw in matches)
+        score = (match_count, max_len, -idx)
+        if score > best_score:
+            best_score = score
+            best_intent = entry
+            best_match_phrase = max(matches, key=len)
 
-        # ── RESPONSE ──────────────────────────────────────────
-        response, source = get_response(clean_input, groq_client, conversation_history)
-        print(f"{BOT_NAME}: {response}")
-        print(f"       ↳ {source}\n")
-
-        # ── UPDATE HISTORY ────────────────────────────────────
-        conversation_history.append({"role": "user",      "content": raw_input})
-        conversation_history.append({"role": "assistant", "content": response})
-
-        # Keep last 20 turns
-        if len(conversation_history) > 20:
-            conversation_history = conversation_history[-20:]
+    if best_intent:
+        return best_intent, best_match_phrase
+    return None
 
 
-def run_chatbot_demo():
-    """Deterministic demo for screenshots with L2, L3, and L4 turns."""
-    groq_client = init_groq()
-    conversation_history = []
-    demo_inputs = [
-        "hello",
-        "what is machine learning",
-        "why do some algorithms seem to work before we even collect enough data?",
-    ]
+class ChatbotState:
+    """Maintain multi-turn session state for hybrid chatbot."""
 
-    print("\n" + "=" * 58)
-    print(f"  {BOT_NAME} v2 — Screenshot Demo | DecodeLabs Batch 2026")
-    print("  Levels: L2-Intent | L3-Regex | L4-Groq Fallback")
-    if groq_client:
-        print("  Groq client: configured")
+    def __init__(self, mode: str = "hybrid") -> None:
+        self.mode = mode  # "hybrid" or "offline"
+        self.last_intent: Optional[Dict[str, Any]] = None
+        self.history: List[Dict[str, str]] = []
+
+    def reset(self) -> None:
+        self.last_intent = None
+        self.history.clear()
+
+
+def get_response(
+    clean_input: str,
+    groq_client=None,
+    conversation_history: Optional[List[Dict[str, str]]] = None,
+    demo_mode: bool = False,
+    state: Optional[ChatbotState] = None,
+    seed: Optional[int] = None,
+) -> Tuple[str, str]:
+    """Process user message and return tuple: (response_text, source_label)."""
+    raw_str = "" if clean_input is None else str(clean_input)
+
+    # 1. Length check & guard
+    if len(raw_str) > 500:
+        raw_str = raw_str[:500]
+        length_notice = " [Note: Input truncated to 500 characters]"
     else:
-        print("  Groq client: not configured, using deterministic fallback text for L4")
-    print("=" * 58 + "\n")
+        length_notice = ""
 
-    for raw_input in demo_inputs:
-        clean_input = sanitize(raw_input)
-        response, source = get_response(clean_input, groq_client, conversation_history, demo_mode=True)
-        print(f"You  : {raw_input}")
-        print(f"{BOT_NAME}: {response}")
-        print(f"       ↳ {source}\n")
-        conversation_history.append({"role": "user", "content": raw_input})
-        conversation_history.append({"role": "assistant", "content": response})
+    norm = normalize_text(raw_str)
+
+    # Empty input
+    if not norm:
+        return "I didn't catch that. Please type a question or type 'help'!", "[Fallback]"
+
+    # Exit check
+    if norm in EXIT_COMMANDS or re.search(r"\b(exit|quit|goodbye|bye)\b", norm):
+        return "Goodbye! Keep building great things. 🚀", "[L2-Intent]"
+
+    # Guardrails check
+    guard_refusal = check_guardrails(norm)
+    if guard_refusal:
+        return guard_refusal, "[Fallback]"
+
+    # Context follow-up queries (e.g. "tell me more", "why", "elaborate")
+    followup_triggers = {"tell me more", "why", "more", "explain more", "elaborate", "can you elaborate"}
+    if state and state.last_intent and norm in followup_triggers:
+        followup_text = state.last_intent.get("follow_up")
+        if followup_text:
+            return followup_text, "[L2-Intent]"
+
+    intents = load_intents()
+
+    # Time zone vs current clock differentiation
+    if "time zone" in norm or "timezone" in norm:
+        if groq_client and (state is None or state.mode == "hybrid") and not demo_mode:
+            return ask_groq(groq_client, conversation_history or [], raw_str) + length_notice, "[L4-Groq]"
+        return "India operates on Indian Standard Time (IST), UTC+05:30.", "[L3-Regex]"
+
+    # L2: Intent Matching
+    match_result = find_best_intent(norm, intents)
+    if match_result:
+        intent_entry, _ = match_result
+        if state is not None:
+            state.last_intent = intent_entry
+
+        responses = intent_entry.get("responses", [])
+        if not responses:
+            return "Intent recognized, but template is missing.", "[L2-Intent]"
+
+        if seed is not None:
+            rng = random.Random(seed)
+            reply = rng.choice(responses)
+        else:
+            reply = random.choice(responses)
+
+        if reply == "TIME_DYNAMIC":
+            now = datetime.datetime.now()
+            reply = f"The current system time is {now.strftime('%I:%M:%S %p')} on {now.strftime('%A, %d %B %Y')}."
+        return reply + length_notice, "[L2-Intent]"
+
+    # L3: Fuzzy typo recovery
+    all_keywords = []
+    kw_to_intent = {}
+    for entry in intents:
+        for kw in entry.get("keywords", []):
+            k_norm = normalize_text(kw)
+            all_keywords.append(k_norm)
+            kw_to_intent[k_norm] = entry
+
+    fuzzy_hits = get_close_matches(norm, all_keywords, n=1, cutoff=0.8)
+    if fuzzy_hits:
+        entry = kw_to_intent[fuzzy_hits[0]]
+        if state is not None:
+            state.last_intent = entry
+        responses = entry.get("responses", [])
+        reply = responses[0] if responses else "Understood."
+        if reply == "TIME_DYNAMIC":
+            now = datetime.datetime.now()
+            reply = f"Current time is {now.strftime('%I:%M %p, %d %B %Y')}."
+        return reply + length_notice, "[L3-Regex]"
+
+    # L4: Real Groq LLM Fallback (Dynamic Runtime Generation)
+    current_mode = state.mode if state else ("hybrid" if groq_client else "offline")
+    if current_mode == "hybrid" and groq_client is not None and not demo_mode:
+        llm_reply = ask_groq(groq_client, conversation_history or [], raw_str)
+        return llm_reply + length_notice, "[L4-Groq]"
+
+    # Unmatched query logging
+    log_unknown_query(raw_str)
+
+    return (
+        "I can explain AI, ML, NLP, Deep Learning, and DecodeLabs projects. "
+        "Try asking: 'what is machine learning', 'tell me a joke', 'what time is it', or type '/help'."
+    ) + length_notice, "[Fallback]"
 
 
-# ── ENTRY POINT ───────────────────────────────────────────────
+def run_chatbot(demo: bool = False, save_output: bool = False, mode: str = "hybrid") -> None:
+    """Run interactive or demo session for Chatbot v2 in a representable, dynamic manner."""
+    state = ChatbotState(mode=mode)
+    groq_client = init_groq() if mode == "hybrid" else None
+
+    # Representable Terminal Banner
+    print("\n" + "=" * 65)
+    print(f"  {BOLD}{CYAN}🤖 DBot v2 — Dynamic Industrial AI Chatbot{RESET}")
+    print(f"  {DIM}DecodeLabs Industrial Training Kit | Batch 2026{RESET}")
+    print(f"  Status : {GREEN}ONLINE{RESET} | Engine: {MAGENTA}{'Groq Llama 3.3 (Connected)' if groq_client else 'Rule-Based Engine (Offline)'}{RESET}")
+    print(f"  Commands: {YELLOW}/help{RESET}, {YELLOW}/reset{RESET}, {YELLOW}/history{RESET}, {YELLOW}/mode{RESET}, {YELLOW}/save{RESET}, {YELLOW}/exit{RESET}")
+    print("=" * 65 + "\n")
+
+    transcript: List[Tuple[str, str, str]] = []
+
+    if demo:
+        test_queries = [
+            "hello",
+            "what is machine learning",
+            "tell me more",
+            "wat is ai",
+            "what is the time",
+            "what is the difference between supervised and unsupervised learning?",
+            "/history",
+            "exit",
+        ]
+        for query in test_queries:
+            if query == "/history":
+                print(f"{BOLD}You  :{RESET} {query}")
+                print(f"{CYAN}{BOT_NAME}:{RESET} History contains {len(state.history)} message turns.\n")
+                continue
+
+            resp, source = get_response(
+                query,
+                groq_client=groq_client,
+                conversation_history=state.history,
+                demo_mode=False if groq_client else True,
+                state=state,
+                seed=42,
+            )
+            state.history.append({"role": "user", "content": query})
+            state.history.append({"role": "assistant", "content": resp})
+            transcript.append((query, resp, source))
+
+            print(f"{BOLD}You  :{RESET} {query}")
+            print(f"{CYAN}{BOT_NAME}:{RESET} {resp}")
+            print(f"       {DIM}↳ Source: {source}{RESET}\n")
+            time.sleep(0.3)
+    else:
+        # Welcome greeting
+        welcome_msg = (
+            f"Hello! I am {BOT_NAME}, your AI career and technical assistant at DecodeLabs. "
+            f"Ask me any question about AI, Machine Learning, Python, or our project suite!"
+        )
+        sys.stdout.write(f"{CYAN}{BOT_NAME}:{RESET} ")
+        stream_print(welcome_msg, delay=0.01)
+        print()
+
+        while True:
+            try:
+                raw_input = input(f"{BOLD}You  :{RESET} ").strip()
+            except (KeyboardInterrupt, EOFError):
+                print(f"\n{CYAN}{BOT_NAME}:{RESET} Caught interrupt. Goodbye! 🚀\n")
+                break
+
+            if not raw_input:
+                print(f"{CYAN}{BOT_NAME}:{RESET} I'm listening! Please type a question.\n")
+                continue
+
+            # Command dispatcher
+            if raw_input.startswith("/"):
+                cmd = raw_input.lower().strip()
+                if cmd in {"/exit", "/quit"}:
+                    print(f"{CYAN}{BOT_NAME}:{RESET} Goodbye! Keep building great things. 🚀\n")
+                    break
+                elif cmd == "/reset":
+                    state.reset()
+                    print(f"{CYAN}{BOT_NAME}:{RESET} Conversation history and context memory reset.\n")
+                    continue
+                elif cmd == "/history":
+                    print(f"\n{YELLOW}--- Recent Conversation History ({len(state.history)} messages) ---{RESET}")
+                    for h in state.history[-8:]:
+                        role_tag = f"{BOLD}You{RESET}" if h["role"] == "user" else f"{CYAN}{BOT_NAME}{RESET}"
+                        print(f"  {role_tag}: {h['content']}")
+                    print(f"{YELLOW}------------------------------------------------------------{RESET}\n")
+                    continue
+                elif cmd.startswith("/mode"):
+                    parts = cmd.split()
+                    if len(parts) > 1 and parts[1] in {"offline", "hybrid"}:
+                        state.mode = parts[1]
+                        groq_client = init_groq() if state.mode == "hybrid" else None
+                        status_str = "Hybrid (Groq Llama 3.3)" if groq_client else "Offline (Rule-Based)"
+                        print(f"{CYAN}{BOT_NAME}:{RESET} Mode switched to: {status_str}\n")
+                    else:
+                        print(f"{CYAN}{BOT_NAME}:{RESET} Usage: /mode offline | /mode hybrid\n")
+                    continue
+                elif cmd == "/help":
+                    print(
+                        f"\n{BOLD}Available Commands & Capabilities:{RESET}\n"
+                        f"  {YELLOW}/help{RESET}            - Display this help manual\n"
+                        f"  {YELLOW}/history{RESET}         - View active conversation context\n"
+                        f"  {YELLOW}/reset{RESET}           - Reset context memory\n"
+                        f"  {YELLOW}/mode <mode>{RESET}    - Switch mode ('offline' or 'hybrid')\n"
+                        f"  {YELLOW}/save{RESET}            - Save transcript to outputs/\n"
+                        f"  {YELLOW}/exit{RESET}            - End session\n"
+                        f"\n{DIM}Topics you can explore: Machine Learning, Deep Learning, NLP, Time, Jokes, Projects.{RESET}\n"
+                    )
+                    continue
+                elif cmd == "/save":
+                    OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
+                    target = OUTPUTS_DIR / "chatbot_v2_transcript.txt"
+                    with open(target, "w", encoding="utf-8") as f:
+                        for u, b, s in transcript:
+                            f.write(f"User: {u}\nDBot: {b}\nSource: {s}\n\n")
+                    print(f"{CYAN}{BOT_NAME}:{RESET} Transcript successfully saved to {target}\n")
+                    continue
+
+            resp, source = get_response(
+                raw_input,
+                groq_client=groq_client,
+                conversation_history=state.history,
+                demo_mode=False,
+                state=state,
+            )
+            state.history.append({"role": "user", "content": raw_input})
+            state.history.append({"role": "assistant", "content": resp})
+            transcript.append((raw_input, resp, source))
+
+            # Dynamic streaming print for response
+            sys.stdout.write(f"{CYAN}{BOT_NAME}:{RESET} ")
+            stream_print(resp, delay=0.008)
+            print(f"       {DIM}↳ Source: {source}{RESET}\n")
+
+            if normalize_text(raw_input) in EXIT_COMMANDS:
+                break
+
+    if save_output:
+        OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
+        out_file = OUTPUTS_DIR / "chatbot_v2_transcript.txt"
+        with open(out_file, "w", encoding="utf-8") as f:
+            for u, b, s in transcript:
+                f.write(f"User: {u}\nDBot: {b}\nSource: {s}\n\n")
+        print(f"[Transcript saved to: {out_file}]")
+
+
+def build_arg_parser() -> argparse.ArgumentParser:
+    """Build CLI parser."""
+    parser = argparse.ArgumentParser(description="DecodeLabs Chatbot V2 (Dynamic Hybrid AI Engine)")
+    parser.add_argument("--demo", action="store_true", help="Run automated demo session")
+    parser.add_argument("--save-output", action="store_true", help="Save transcript to outputs/")
+    parser.add_argument("--mode", choices=["hybrid", "offline"], default="hybrid", help="Chatbot execution mode")
+    return parser
+
+
 if __name__ == "__main__":
-    if len(sys.argv) > 1 and sys.argv[1].lower() == "demo":
-        run_chatbot_demo()
-    else:
-        run_chatbot()
+    args = build_arg_parser().parse_args()
+    run_chatbot(demo=args.demo, save_output=args.save_output, mode=args.mode)

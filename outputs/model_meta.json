@@ -1,0 +1,98 @@
+{
+  "sklearn_version": "1.9.1",
+  "model_type": "KNeighborsClassifier",
+  "best_params": {
+    "metric": "euclidean",
+    "n_neighbors": 5,
+    "weights": "uniform"
+  },
+  "metrics": {
+    "cv_summary": {
+      "n_folds": 5,
+      "k": 5,
+      "mean_accuracy": 0.9733333333333334,
+      "std_accuracy": 0.02494438257849294,
+      "mean_f1": 0.9732999164578111,
+      "std_f1": 0.024953345579177822,
+      "accuracy_scores": [
+        1.0,
+        0.9666666666666667,
+        0.9333333333333333,
+        1.0,
+        0.9666666666666667
+      ],
+      "f1_scores": [
+        1.0,
+        0.9665831244778613,
+        0.9333333333333332,
+        1.0,
+        0.9665831244778613
+      ]
+    },
+    "holdout_test": {
+      "accuracy": 0.9333333333333333,
+      "f1_weighted": 0.9326599326599326
+    },
+    "model_comparison": [
+      {
+        "model": "K-Nearest Neighbors (KNN)",
+        "mean_accuracy": 0.9733333333333334,
+        "std_accuracy": 0.02494438257849294,
+        "mean_f1": 0.9732999164578111,
+        "std_f1": 0.024953345579177822
+      },
+      {
+        "model": "Support Vector Machine (RBF)",
+        "mean_accuracy": 0.96,
+        "std_accuracy": 0.038873012632301994,
+        "mean_f1": 0.9599331662489557,
+        "std_f1": 0.038947565538545434
+      },
+      {
+        "model": "Decision Tree",
+        "mean_accuracy": 0.9533333333333335,
+        "std_accuracy": 0.03399346342395189,
+        "mean_f1": 0.9531151110098477,
+        "std_f1": 0.034138786907427096
+      },
+      {
+        "model": "Logistic Regression",
+        "mean_accuracy": 0.9533333333333334,
+        "std_accuracy": 0.04521553322083511,
+        "mean_f1": 0.953216374269006,
+        "std_f1": 0.0453288553592332
+      },
+      {
+        "model": "Random Forest",
+        "mean_accuracy": 0.9466666666666667,
+        "std_accuracy": 0.02666666666666666,
+        "mean_f1": 0.9464317359054201,
+        "std_f1": 0.026784849877409648
+      },
+      {
+        "model": "Gaussian Naive Bayes",
+        "mean_accuracy": 0.9466666666666667,
+        "std_accuracy": 0.039999999999999994,
+        "mean_f1": 0.9465329991645781,
+        "std_f1": 0.0401002506265664
+      }
+    ],
+    "best_hyperparameters": {
+      "metric": "euclidean",
+      "n_neighbors": 5,
+      "weights": "uniform"
+    }
+  },
+  "timestamp": "2026-11-15T23:32:57.204029",
+  "features": [
+    "sepal length (cm)",
+    "sepal width (cm)",
+    "petal length (cm)",
+    "petal width (cm)"
+  ],
+  "classes": [
+    "setosa",
+    "versicolor",
+    "virginica"
+  ]
+}

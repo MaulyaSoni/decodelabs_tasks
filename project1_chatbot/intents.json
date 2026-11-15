@@ -1,0 +1,150 @@
+{
+  "intents": [
+    {
+      "intent": "greeting",
+      "keywords": ["hello", "hi", "hey", "good morning", "good evening", "good afternoon", "howdy", "greetings"],
+      "responses": [
+        "Hey there! I'm DBot, your AI assistant. How can I help you today?",
+        "Hi! Great to see you. What's on your mind?",
+        "Hello! I'm listening. Ask me anything about AI or DecodeLabs."
+      ],
+      "follow_up": "I can help explain AI/ML concepts, tell a joke, or guide you through our projects!"
+    },
+    {
+      "intent": "farewell",
+      "keywords": ["bye", "goodbye", "see you later", "take care", "cya", "farewell"],
+      "responses": [
+        "Goodbye! Keep building great things. 🚀",
+        "See you on the other side of the terminal! Happy coding!",
+        "Take care! Come back whenever you have questions."
+      ],
+      "follow_up": "Whenever you're back, feel free to ask about AI and engineering."
+    },
+    {
+      "intent": "identity",
+      "keywords": ["who are you", "what are you", "your name", "are you a bot", "are you human"],
+      "responses": [
+        "I'm DBot — a hybrid AI chatbot built at DecodeLabs in Lucknow, India.",
+        "My name is DBot. Short for DecodeLabs Bot — combining rule-based speed with LLM flexibility.",
+        "I'm an AI assistant designed for the DecodeLabs Industrial Training Kit Batch 2026."
+      ],
+      "follow_up": "I use deterministic rules for fast answers, and can fall back to an LLM for complex queries."
+    },
+    {
+      "intent": "creator",
+      "keywords": ["who made you", "who created you", "who built you", "who programmed you"],
+      "responses": [
+        "I was crafted by an AI intern at DecodeLabs, Batch 2026.",
+        "A future AI Engineer following the DecodeLabs industrial training kit built me!",
+        "Built at DecodeLabs, Greater Lucknow, as part of Project 1."
+      ],
+      "follow_up": "DecodeLabs focuses on hands-on practical AI engineering with real code."
+    },
+    {
+      "intent": "capability",
+      "keywords": ["what can you do", "help", "commands", "features"],
+      "responses": [
+        "I can answer questions on AI, ML, NLP, and Deep Learning, tell jokes, report the time, and guide your career path! Type /help for available commands."
+      ],
+      "follow_up": "Try asking: 'what is ml', 'tell me a joke', 'what time is it', or type '/history'."
+    },
+    {
+      "intent": "ai_definition",
+      "keywords": ["what is ai", "artificial intelligence", "define ai", "meaning of ai"],
+      "responses": [
+        "AI (Artificial Intelligence) is the simulation of human intelligence by machines — enabling them to learn, reason, and make decisions.",
+        "Artificial Intelligence refers to computer systems engineered to perform tasks typically requiring human perception, reasoning, and learning."
+      ],
+      "follow_up": "AI encompasses subfields like Machine Learning, Deep Learning, Computer Vision, and NLP."
+    },
+    {
+      "intent": "ml_definition",
+      "keywords": ["what is ml", "machine learning", "what is machine learning", "define ml", "how does ml work"],
+      "responses": [
+        "Machine Learning (ML) is a subset of AI where systems automatically learn patterns from data without being explicitly programmed for every scenario.",
+        "ML uses statistical algorithms to train models on historical data to predict outcomes or classify new inputs accurately."
+      ],
+      "follow_up": "ML includes Supervised Learning (e.g. KNN, SVM), Unsupervised Learning (e.g. Clustering), and Reinforcement Learning."
+    },
+    {
+      "intent": "llm_definition",
+      "keywords": ["what is llm", "large language model", "what are llms", "define llm"],
+      "responses": [
+        "LLMs (Large Language Models) are massive deep neural networks trained on vast textual datasets. They predict token sequences to generate natural language.",
+        "Large Language Models use the Transformer architecture with self-attention to understand, generate, and reason over text."
+      ],
+      "follow_up": "Modern LLMs like Llama 3, GPT-4, and Claude power interactive conversational AI and code generation."
+    },
+    {
+      "intent": "deep_learning",
+      "keywords": ["what is deep learning", "deep learning", "neural networks", "what is cnn"],
+      "responses": [
+        "Deep Learning uses multi-layered artificial neural networks (ANNs) to model high-level abstractions in data like images, audio, and text.",
+        "Deep Learning is a subset of ML based on deep architectures: CNNs for vision, Transformers for sequences, and RNNs for temporal data."
+      ],
+      "follow_up": "Deep learning requires substantial compute (GPUs) and large datasets for training."
+    },
+    {
+      "intent": "nlp",
+      "keywords": ["what is nlp", "natural language processing", "text processing"],
+      "responses": [
+        "NLP (Natural Language Processing) enables computers to read, analyze, interpret, and generate human languages using linguistic and statistical methods."
+      ],
+      "follow_up": "Common NLP tasks include tokenization, TF-IDF vectorization, named entity recognition, and sentiment analysis."
+    },
+    {
+      "intent": "decodelabs",
+      "keywords": ["what is decodelabs", "decodelabs", "decodelabs tech", "about decodelabs"],
+      "responses": [
+        "DecodeLabs is an AI and software engineering training initiative based in Greater Lucknow, India. It emphasizes hands-on, production-grade project development."
+      ],
+      "follow_up": "DecodeLabs offers end-to-end industry training in ML, Deep Learning, Full-Stack, and Cloud."
+    },
+    {
+      "intent": "projects",
+      "keywords": ["what are the projects", "what is project 1", "what is project 2", "what is project 3", "what is project 4", "projects"],
+      "responses": [
+        "The DecodeLabs AI Suite includes 4 integrated projects:\n  P1: Rule-Based & Hybrid AI Chatbot\n  P2: Data Classification using KNN (Iris)\n  P3: AI Recommendation Engine (TF-IDF + Cosine Similarity)\n  P4: Image & Text Recognition (OCR + MobileNet-SSD Object Detection)"
+      ],
+      "follow_up": "All 4 projects can run independently or consecutively through main.py!"
+    },
+    {
+      "intent": "jokes",
+      "keywords": ["tell me a joke", "joke", "make me laugh", "another joke"],
+      "responses": [
+        "Why do programmers prefer dark mode? Because light attracts bugs! 🐛",
+        "There are 10 types of people in the world: those who understand binary, and those who don't.",
+        "Why did the AI break up with the rule engine? Too many nested conditions!"
+      ],
+      "follow_up": "Want another joke, or would you like to explore AI topics?"
+    },
+    {
+      "intent": "motivation",
+      "keywords": ["motivate me", "i am tired", "i give up", "motivation", "inspire me"],
+      "responses": [
+        "An LLM without rules is a hallucination engine. YOU write the rules. Every line of code is a building block for your future. Keep going! 💪",
+        "Bugs are just undiscovered features. Take a break, debug your thoughts, and return stronger!",
+        "Consistency beats talent every single time. One commit a day keeps imposter syndrome away!"
+      ],
+      "follow_up": "Remember: even the most complex AI models started with a single line of Python."
+    },
+    {
+      "intent": "time",
+      "keywords": ["what time is it", "what is the time", "current time", "time now", "tell me time", "clock"],
+      "responses": [
+        "TIME_DYNAMIC"
+      ],
+      "follow_up": "Time management is key to becoming a top-tier engineer!"
+    },
+    {
+      "intent": "thanks",
+      "keywords": ["thank you", "thanks", "thx", "appreciate it"],
+      "responses": [
+        "You're very welcome! Happy to assist. 😊",
+        "Glad I could help! Keep up the great work.",
+        "Anytime! Feel free to ask more questions."
+      ],
+      "follow_up": "Is there anything else you'd like to work on?"
+    }
+  ]
+}
